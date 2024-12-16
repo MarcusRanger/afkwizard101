@@ -7,53 +7,37 @@ from random import uniform
 import time
 import pygetwindow as gw
 import easyocr
+#from PIL import Image
 
 window_title = "Wizard101"
 windows = gw.getWindowsWithTitle(window_title)
-potionTimer = 58
+original_window_width = 1920
+original_window_height = 1080
+potion_timer = 58
+mana_limit = 10
 macrostart = time.time()
-window =  None
+window = None
+
 for stuff in windows:
-     if stuff.title == window_title:
-          window = stuff
+    if stuff.title == window_title:
+        window = stuff
 
-    # Take a screenshot of the window
-
-
-
-# # Prefered imagebase = 00007FF646C70000
-# # "WizardGraphicalClient.exe"+0335DCF8
-
-
-# baseaddress = 0x7FF646C6FFF0
-# staticaddress = 0x0335B518
-# pointstaticaddress = c_ulonglong(baseaddress+staticaddress)
-
-# rwm = ReadWriteMemory()
-# process = rwm.get_process_by_name("WizardGraphicalClient.exe")
-# process.open()
-# manapointer = process.get_pointer(pointstaticaddress, offsets=[0x68, 0x0, 0x18, 0x10, 0x10, 0x220, 0x80])
-
-# print(manapointer)
-# value = process.read(manapointer)
-# print(value)
-
-def timer():
+def use_potion():
     global macrostart
     global window
-    currenttime = time.time()
-    outSideBattle = pyautogui.pixel(286,878) == (253,146,206) #if the pet thing isnt present then we are probably in battle
-    print((currenttime-macrostart)/60)
-    if ((currenttime-macrostart)/60 >= potionTimer) and outSideBattle:
+    window_rect = (window.left, window.top, window.width, window.height)
+    relative_pixel = (286, 878)  # Original pixel location
+    relative_x = window_rect[0] + relative_pixel[0]
+    relative_y = window_rect[1] + relative_pixel[1]
+
+    outSideBattle = pyautogui.pixel(relative_x, relative_y) == (253, 146, 206)  # Adjusted for window
+    if outSideBattle:
         macrostart = time.time()
         window.activate()
-        print("beton iit")
-        pyautogui.hotkey("ctrl", "o",interval=.1)
+        pyautogui.hotkey("ctrl", "o", interval=.1)
         pyautogui.sleep(.5)
 
-            #idx+=1
-# Make sure to install OpenCV: pip install opencv-python
-def match_template(screenshot, template_path, scales=[.8,.9,1,1.1,1.2], threshold=.9):
+def match_template(screenshot, template_path, scales=[.8, .9, 1, 1.1, 1.2], threshold=.9):
     screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
     template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
     
@@ -69,144 +53,111 @@ def match_template(screenshot, template_path, scales=[.8,.9,1,1.1,1.2], threshol
         if max_val > best_match['val'] and max_val > threshold:
             best_match = {'val': max_val, 'loc': max_loc, 'scale': scale}
     return best_match
-
-
-def preprocess_for_ocr(image, target_bgr, threshold_range=0,occlude_top_left_corner=True):
-    # Convert to HSV color space
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    # Convert the target BGR color to the HSV color space
-    target_hsv = cv2.cvtColor(np.uint8([[target_bgr]]), cv2.COLOR_BGR2HSV)[0][0]
-    lower_bound = np.array([target_hsv[0] - threshold_range, 100, 100], dtype=np.uint8)
-    upper_bound = np.array([target_hsv[0] + threshold_range, 255, 255], dtype=np.uint8)
-    # Create a mask that captures areas of the target color
-    mask = cv2.inRange(hsv, lower_bound, upper_bound)
-
-    # Isolate the image area with the target color
-    isolated = cv2.bitwise_and(image, image, mask=mask)
-     # If occlusion of the top left corner is requested
-    if occlude_top_left_corner: #
-        # Determine the size of the area to occlude
-        # These values might need to be adjusted
-        height_to_occlude = int(image.shape[0] * 0.2)  # 20% of the height
-        width_to_occlude = int(image.shape[1] * 0.2)  # 20% of the width
-        cv2.rectangle(isolated, (0, 0), (width_to_occlude, height_to_occlude), (0, 0, 0), -1)
-    # Convert to grayscale
-    gray = cv2.cvtColor(isolated, cv2.COLOR_BGR2GRAY)
-
-    # Increase contrast and apply threshold
-    _, thresholded = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Dilate and erode to close gaps in text and remove noise
-    kernel = np.ones((2, 2), np.uint8)
-    dilated = cv2.dilate(thresholded, kernel, iterations=1)
-    eroded = cv2.erode(dilated, kernel, iterations=1)
-
-    # Resize image to increase the size using interpolation
-    resized = cv2.resize(eroded, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-
-    return resized
+def get_center_from_bounding_box(bbox):
+    x_coords = [point[0] for point in bbox]
+    y_coords = [point[1] for point in bbox]
+    
+    # Calculate the center
+    center_x = sum(x_coords) / len(x_coords)
+    center_y = sum(y_coords) / len(y_coords)
+    
+    return int(center_x), int(center_y)
 
 def read_text_with_easyocr(image_path):
-    # Create a reader object
-    reader = easyocr.Reader(['en'])  # 'en' is for English language
-    # Read the text from the image
-    results = reader.readtext(image_path)
+    if not image_path.any(): #weird, check type and then validate(?)
+        print("Couldn't find image path to read text!")
+        return None
+    reader = easyocr.Reader(['en'])
+    results = reader.readtext(image_path, mag_ratio=1.2) #adjust magnification if its inconsistent
 
-    # Process the results
     text_output = []
     for (bbox, text, prob) in results:
-        # bbox is the bounding box information of the text
-        # text is the string of text recognized
-        # prob is the probability of the prediction
-        text_output.append((text, prob))
+        print(text, prob)
+        if text.isdigit():
+            text_output.append((get_center_from_bounding_box(bbox), text, prob))
     if not text_output: return None
-    return max(text_output, key=lambda x: x[1])
+    print(text_output, "seguramente")
+    return text_output
 
 cyan_bgr = (252, 255, 19)
-
-def read_mana_numbers(template_path):
-    screenshot = np.array(pyautogui.screenshot())
-    match = match_template(screenshot, template_path)
-    
-    if match:  
-        template = cv2.imread(template_path, cv2.IMREAD_COLOR)
-        h, w, _ = template.shape
-        top_left = match['loc']
-        bottom_right = (top_left[0] + w, top_left[1] + h)
-        crop_img = screenshot[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
-        debug_image_path = 'videopictures/cropped_processed_image.PNG'
-        cv2.imwrite(debug_image_path, crop_img)
-
-        # Assuming preprocess_for_ocr and read_text_with_easyocr are defined
-        # Preprocess the cropped image for better OCR
-        processed_img = preprocess_for_ocr(crop_img, cyan_bgr)  # BGR for cyan
-
-        cv2.imwrite('videopictures/preprocessed.png', processed_img)
-        
-        # Use EasyOCR to do OCR on the processed image
-        text_from_mana = read_text_with_easyocr('videopictures/preprocessed.png')
-        
-        return text_from_mana
-    
-    else:
-        print("No match found.")
-        return None
 
 def find_image_on_screen(template_path):
     global window
     window.activate()
-    screenshot = np.array(pyautogui.screenshot())
+    window_rect = (window.left, window.top, window.width, window.height)
+    region = (window_rect[0], window_rect[1], window_rect[2], window_rect[3])
+
+    screenshot = np.array(pyautogui.screenshot(region=region))  # Only screenshot the window region
     match = match_template(screenshot, template_path)
-    
-    if match:
-        print(f"Image found on with value {match['val']}")
+    print(f"Current image {match}")
+    if match and match['val'] > .95: #need to be 
+        print(f"Image found with value {match['val']}")
         template = cv2.imread(template_path, cv2.IMREAD_COLOR)
         h, w, _ = template.shape
         top_left = match['loc']
         bottom_right = (top_left[0] + w, top_left[1] + h)
         crop_img = screenshot[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
         debug_image_path = 'videopictures/cropped_processed_image_found.PNG'
-        cv2.imwrite(debug_image_path, crop_img)
-        # ... (add any additional code for highlighting or actions here)
-        return True
+        found_image = cv2.imwrite(debug_image_path, crop_img)
+        if found_image:
+            return debug_image_path, match['loc']
+        print("Error with writing image to folder.")
+        return None
     else:
         print("Image not found on screen.")
-        return False
-#find_image_on_screen('videopictures/fire_ball.PNG')
-
-numbers = read_mana_numbers('videopictures/mana_bar.PNG')
-
-if numbers:
-    print(f"Number found on screen: {int(''.join(filter(str.isdigit, numbers[0])))}")
-else:
-    print("No number found")
-
-
-def in_fight():
-
+        return None
+    
+def read_vitality():
     global window
     window.activate()
-    #location = pyautogui.locateOnScreen('videopictures/fire_ball.PNG',grayscale=True, confidence=0.6)
-    # Screenshot the area within the game window
-    #handles battle logic and plan for when a pig joins the fight late
-    location = None
-    while keyboard.is_pressed('q') == False:
-        timer()
-        window.activate()
-        with pyautogui.hold('left'):
-            pyautogui.sleep(uniform(.7,1))
-        window.activate()
-        location = pyautogui.locateOnScreen('videopictures/fire_ball.PNG',grayscale=True, confidence=0.4)
-        #passbutton = pyautogui.locateOnScreen('videopictures/pass_button.PNG',grayscale=True, confidence=0.6)
-        secondPersonHere = pyautogui.pixel(574,93) == (255,60,0) #checks the red background of key logo
-        if  location and secondPersonHere:
-                pyautogui.click(x=location.left, y= location.top, clicks=2, interval=0.25) 
-                print(location)
-                pyautogui.sleep(4) #see if both are deadwsws
-         
-        elif location and not secondPersonHere:
-             pyautogui.moveTo(655, 670, 1, pyautogui.easeInQuad)
-             pyautogui.click(x=655, y=670, clicks=2, interval=0.25)
-             pyautogui.sleep(6)
+    window_rect = (window.left, window.top, window.width, window.height)
+    region = (window_rect[0], window_rect[1], window_rect[2], window_rect[3])
+    image = np.array(pyautogui.screenshot(region=region))
+    height, width, _ = image.shape
+    x_start, y_start = 0, int(height * 0.75)  # Start from the bottom-left quarter
+    x_end, y_end = int(width * 0.25), height  # Cover 25% width and bottom quarter
+    # Crop the region of interest
+    cropped_image = image[y_start:y_end, x_start:x_end]
+    debug_image_path = 'videopictures/NOWcropped_processed_image_found.PNG'
+    cv2.imwrite(debug_image_path, cropped_image)
+    
+    results = read_text_with_easyocr(cropped_image) #keep in mind this function doesnt have any explicit checks for numbers
+    if not results:
+        print("No results found")
+        return None
+    results.sort(key=lambda cord: cord[0][0]) #want the right most bounding box number as mana will always be the right most
+    print(results[-1][1], "Soy")
+    return results[-1][1] #we only care about mana for now
 
-        
+def in_fight():
+    global window
+    window.activate()
+    window_rect = (window.left, window.top, window.width, window.height)
+    
+    while not keyboard.is_pressed('q'):
+        window.activate()
+
+        with pyautogui.hold('left'):
+            pyautogui.sleep(uniform(.7, 1))
+        seguramente, location = find_image_on_screen('videopictures/fire_ball.PNG')
+        print(seguramente, location)
+        if read_vitality() <= mana_limit:
+            use_potion()
+            #probably use the flee option if use potion doesnt do something.
+        secondPersonHere_pixel = (574, 93) #magic numbers for figuring out if an enemy is present
+        secondPersonHere_x = window_rect[0] + secondPersonHere_pixel[0]
+        secondPersonHere_y = window_rect[1] + secondPersonHere_pixel[1]
+
+        secondPersonHere = pyautogui.pixel(secondPersonHere_x, secondPersonHere_y) == (255, 60, 0) #may have to rewrite this too, no?
+
+        if location and secondPersonHere:
+            pyautogui.click(x=location.left, y=location.top, clicks=2, interval=0.25)
+            print(location)
+            pyautogui.sleep(4)
+        elif location and not secondPersonHere:
+            pyautogui.moveTo(window_rect[0] + 655, window_rect[1] + 670, 1, pyautogui.easeInQuad) #this is to skip turn I assume
+            pyautogui.click(x=window_rect[0] + 655, y=window_rect[1] + 670, clicks=2, interval=0.25)
+            pyautogui.sleep(6)
+
+
+in_fight()
