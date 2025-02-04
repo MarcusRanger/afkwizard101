@@ -369,7 +369,6 @@ def context_engine():
     #take information from piped and act on it
     after_context_prompt = f"Given the state of enemies {enemy_health} and cards {current_hand}. Whats the move? Only pick one card."
     response = get_model_response(after_context_prompt)
-    response = None
     
     if not response:
         print("Couldn't generate game plan")
