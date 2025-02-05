@@ -245,9 +245,9 @@ def get_text_in_midsection(text_from_screenshot):
     window_rect = (window.left, window.top, window.width, window.height)
     window_height = window_rect[3]
 
-    # Define the midsection range (30% to 70% of the window height)
-    mid_start = int(window_height * 0.3)
-    mid_end = int(window_height * 0.7)
+    # Define the midsection range (60% to 63% of the window height)
+    mid_start = int(window_height * 0.55)
+    mid_end = int(window_height * 0.63)
 
     # Filter for text that is located within the midsection of the screen
     midsection_text = [
@@ -258,7 +258,17 @@ def get_text_in_midsection(text_from_screenshot):
 
     return midsection_text
 
-def in_fight():
+def midsectionOnlyCardNameTest():
+    text_from_screenshot = take_text_from_screen_image()
+    current_hand = find_best_text_match(get_text_in_midsection(text_from_screenshot))
+    print(f"Card names{current_hand}")
+
+def get_fight_status():
+    text_from_screenshot = take_text_from_screen_image()
+    enemies = get_enemy_hp(text_from_screenshot)
+    return len(enemies) > 0
+
+def main():
     global window
     if not window:
         print("No window found; Ending script")
@@ -269,28 +279,15 @@ def in_fight():
     while not keyboard.is_pressed('q'):
         window.activate()
 
+        in_fight = get_fight_status()
+        if  in_fight:
+            context_engine()
+
         with pyautogui.hold('left'):
             pyautogui.sleep(uniform(.7, 1))
-        seguramente, location = find_image_on_screen('videopictures/fire_ball.PNG')
-        print(seguramente, location)
         if read_vitality() <= mana_limit:
             use_potion()
-            #probably use the flee option if use potion doesnt do something.
-        secondPersonHere_pixel = (574, 93) #magic numbers for figuring out if an enemy is present
-        secondPersonHere_x = window_rect[0] + secondPersonHere_pixel[0]
-        secondPersonHere_y = window_rect[1] + secondPersonHere_pixel[1]
-
-        secondPersonHere = pyautogui.pixel(secondPersonHere_x, secondPersonHere_y) == (255, 60, 0) 
-
-        if location and secondPersonHere:
-            pyautogui.click(x=location.left, y=location.top, clicks=2, interval=0.25)
-            print(location)
-            pyautogui.sleep(4)
-        elif location and not secondPersonHere:
-            pyautogui.moveTo(window_rect[0] + 655, window_rect[1] + 670, 1, pyautogui.easeInQuad) #to skip turn
-            pyautogui.click(x=window_rect[0] + 655, y=window_rect[1] + 670, clicks=2, interval=0.25)
-            pyautogui.sleep(6)
-
+        
 # Function to send a prompt to the model
 messages = []
 
@@ -342,8 +339,10 @@ def find_best_text_match(ocr_text):
     matches = {}
     for text, (positionX,positionY) in ocr_text:
         seq, best_match, score = process.extractOne(text, valid_text_options, scorer=fuzz.ratio)
-        #print(seq, best_match, score, text)
-        if best_match >= confidence:
+        print(seq, best_match, score, text)
+        if best_match >= confidence and (not 'to select' in text.lower() or not 'to discard' in text.lower()): 
+            if seq not in matches:
+                matches[seq] = []
             matches[seq].append((positionX,positionY))
     return matches
 
@@ -354,12 +353,13 @@ def context_engine():
     text_from_screenshot = take_text_from_screen_image()
     
     #mana = read_vitality(text_from_screenshot)
-    enemy_health = get_enemy_hp(text_from_screenshot)
-    enemy_position = get_enemy_position(text_from_screenshot)
+    enemy_health = get_enemy_hp(text_from_screenshot) # Data formatted for the ai to read
+    enemy_position = get_enemy_position(text_from_screenshot) # Data for pyautogui
     current_hand = find_best_text_match(get_text_in_midsection(text_from_screenshot)) # easyOCR has a hard time figuring out card names
     #print(f"The current mana in battle {mana}")
-    card_info = {key:fire_spells[key.lower()] for key in current_hand.keys()}
-    print(card_info)
+    card_info = {key:fire_spells[key] for key in current_hand.keys()} # Data formatted for the ai to read
+    new_current_hand = {key.lower():value for key,value in current_hand.items()} #weird situation with ai not returning properly cased card names
+    print(f"The current card info of hand is {card_info}")
     print(f"The current hp of enemies {enemy_health}")
     print(f"The current position of the enemies are {enemy_position}")
     print(f"Text in midsection of screen{current_hand}")
@@ -367,27 +367,45 @@ def context_engine():
         print("Not in a battle or error with parsing state of battle")
         return
     #take information from piped and act on it
-    after_context_prompt = f"Given the state of enemies {enemy_health} and cards {current_hand}. Whats the move? Only pick one card."
+    after_context_prompt = f"Given the state of enemies {enemy_health} and cards {card_info}. Whats the move? Only pick one card.\
+        As a reminder make sure your answer is encased within curly brackets to make parsing your answer easy for code."
     response = get_model_response(after_context_prompt)
     
     if not response:
         print("Couldn't generate game plan")
         return
+    #print(response)
     # Deepseek tends to forget that it needs to encase the answer will need a more comprehensive repsonse finding solution
-    if "{" in response and "}" in response:
-        parsed_data = response[response.find("{") + 1 : response.find("}")]
-        parts = parsed_data.split(" on enemy ")
+    result = response.split("</think>", 1)
+    if not result:
+        print("Couldnt find think tag within response")
+        return
+    if len(result) < 1: 
+        print("Result of answer couldnt be parsed")
+    result = result[1].strip()
+    print(result, "Read alert")
+    for key in new_current_hand.keys():
+        if key in result.lower():
+            click_card(key, new_current_hand)
+            return
         
-        # Check if it's an AoE or a single-target card
-        if len(parts) == 1:
-            chosen_card = parts[0].strip()  # AoE move, no enemy specified
-            if chosen_card in card_info:
-                #click card function
-                return
-        elif len(parts) == 2:
-            chosen_card = parts[0].strip()  # Single-target card
+    print("If we reached here then this stupid llm couldnt do the one thing it needed to do")
 
-    
+def click_card(chosen_card, card_pos):
+    global window
+    if not window:
+        print("Couldnt find window")
+        return
+    window.activate()
+    window_rect = (window.left, window.top, window.width, window.height)
+    if chosen_card not in card_pos:
+        print("Failed to find card to click")
+        return
+    posX,posY = card_pos[chosen_card][0]
+    print("going to click!",chosen_card, posX, posY)
+    pyautogui.moveTo(window_rect[0] + posX, window_rect[1] + posY, 1, pyautogui.easeInQuad) 
+    pyautogui.click(x=None, y=None, clicks=2, interval=0.25)
+    pyautogui.sleep(5)
 
 def readTextInPicture(): # test function for hovering over enemy.
     global window
@@ -413,5 +431,5 @@ def readTextInPicture(): # test function for hovering over enemy.
 
 if __name__ == "__main__":
     prepare_ai_thinking()
-    context_engine()
+    main()
     #readTextInPicture()
