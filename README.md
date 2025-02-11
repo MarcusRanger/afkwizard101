@@ -82,6 +82,3 @@ Press **Q** to stop the script at any time.
 ## **License**
 
 This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
-
-
-Let me know if you'd like any further refinements or additions to the README!
