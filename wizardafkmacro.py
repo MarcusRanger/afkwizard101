@@ -198,7 +198,7 @@ def read_vitality(text_from_screenshot):
 
     if not filtered_numbers:
         print("No numbers found in the region of interest.")
-        return None
+        return 0
 
     # Sort by x-coordinate to get the rightmost number (e.g., for mana)
     filtered_numbers.sort(key=lambda item: item[1][0])
@@ -220,8 +220,13 @@ def get_enemy_hp(text_from_screenshot):
         for (center_x, center_y), text, _ in text_from_screenshot
         if "/" in text and center_y <= height_threshold
     ]
-
-    return [filtered[0] for filtered in filtered_hp_text]
+    another_hp_filter = []
+    for text, (center_x, center_y) in filtered_hp_text:
+        x = text.split("/")
+        if len(x) >= 2 and x[0].isdigit() and x[1].isdigit():
+            another_hp_filter.append(text)
+    
+    return another_hp_filter
 
 def get_enemy_position(text_from_screenshot):
     # Define the window region
@@ -258,15 +263,25 @@ def get_text_in_midsection(text_from_screenshot):
 
     return midsection_text
 
-def midsectionOnlyCardNameTest():
-    text_from_screenshot = take_text_from_screen_image()
-    current_hand = find_best_text_match(get_text_in_midsection(text_from_screenshot))
-    print(f"Card names{current_hand}")
-
 def get_fight_status():
-    text_from_screenshot = take_text_from_screen_image()
-    enemies = get_enemy_hp(text_from_screenshot)
-    return len(enemies) > 0
+    global window
+    global imgs
+    if not window:
+        print("No window found.")
+        return False
+
+    template_path = "videopictures\draw_button.PNG"
+    window.activate()
+    
+    window_rect = (window.left, window.top, window.width, window.height)
+    region = (window_rect[0], window_rect[1], window_rect[2], window_rect[3])
+    screenshot = np.array(pyautogui.screenshot(region=region))
+    match = match_template(screenshot, template_path)
+    # cv2.imwrite(f'processed_image_for_ocr{imgs}.png', screenshot)
+    # imgs+=1
+    # If the template is found and has a high confidence value, the fight is active
+    return match and match['val'] >= 0.95
+
 
 def main():
     global window
@@ -280,14 +295,15 @@ def main():
         window.activate()
 
         in_fight = get_fight_status()
-        if  in_fight:
+        if in_fight:
             context_engine()
 
-        with pyautogui.hold('left'):
-            pyautogui.sleep(uniform(.7, 1))
-        if read_vitality() <= mana_limit:
-            use_potion()
-        
+        # with pyautogui.hold('left'):
+        #     pyautogui.sleep(uniform(.7, 1))
+        # text_from_screenshot = take_text_from_screen_image()
+        # if int(read_vitality(text_from_screenshot)) <= mana_limit and not in_fight:
+        #     use_potion()
+        sleep(.5)
 # Function to send a prompt to the model
 messages = []
 
@@ -350,6 +366,10 @@ def context_engine():
     global window
     window.activate()
     #grab information on the battle
+    if not get_fight_status():
+        print("Got here but turn probably ended")
+        return
+
     text_from_screenshot = take_text_from_screen_image()
     
     #mana = read_vitality(text_from_screenshot)
@@ -376,36 +396,76 @@ def context_engine():
         return
     #print(response)
     # Deepseek tends to forget that it needs to encase the answer will need a more comprehensive repsonse finding solution
-    result = response.split("</think>", 1)
-    if not result:
-        print("Couldnt find think tag within response")
-        return
-    if len(result) < 1: 
-        print("Result of answer couldnt be parsed")
-    result = result[1].strip()
-    print(result, "Read alert")
-    for key in new_current_hand.keys():
-        if key in result.lower():
-            click_card(key, new_current_hand)
+    try:
+        result = response.split("</think>", 1)
+        if not result:
+            print("Couldnt find think tag within response")
             return
-        
+        if len(result) < 1: 
+            print("Result of answer couldnt be parsed")
+            return
+        result = result[1].strip()
+        for key in new_current_hand.keys():
+            if key in result.lower():
+                click_card(key, new_current_hand)
+                return
+    except:
+        print("Something critical occured during response parsing")
     print("If we reached here then this stupid llm couldnt do the one thing it needed to do")
 
 def click_card(chosen_card, card_pos):
     global window
     if not window:
-        print("Couldnt find window")
+        print("Couldn't find window.")
         return
+
+    # Activate the window
     window.activate()
+
+    # Get window dimensions
     window_rect = (window.left, window.top, window.width, window.height)
+
     if chosen_card not in card_pos:
-        print("Failed to find card to click")
+        print("Failed to find card to click.")
         return
-    posX,posY = card_pos[chosen_card][0]
-    print("going to click!",chosen_card, posX, posY)
-    pyautogui.moveTo(window_rect[0] + posX, window_rect[1] + posY, 1, pyautogui.easeInQuad) 
+
+    # Position of the chosen card
+    posX, posY = card_pos[chosen_card][0]
+
+    # Adjust positions to be absolute screen coordinates
+    posX += window_rect[0]
+    posY += window_rect[1]
+
+    # Visualize the bounding boxes of all detected cards
+    region = (window_rect[0], window_rect[1], window_rect[2], window_rect[3])
+    screenshot = np.array(pyautogui.screenshot(region=region))
+
+    # Draw bounding boxes for each detected card
+    for card, positions in card_pos.items():
+        for (x, y) in positions:
+            # Adjust for window offset
+            x += window_rect[0]
+            y += window_rect[1]
+
+            # Define bounding box coordinates
+            top_left = (x - 20, y - 20)
+            bottom_right = (x + 20, y + 20)
+
+            # Draw bounding box and label
+            cv2.rectangle(screenshot, top_left, bottom_right, (0, 255, 0), 2)
+            cv2.putText(screenshot, card, (x - 40, y - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Save the image with updated bounding boxes
+    debug_image_path = "card_bounding_boxes_corrected.png"
+    cv2.imwrite(debug_image_path, screenshot)
+    print(f"Bounding boxes saved to {debug_image_path}")
+
+    # Click on the chosen card
+    print(f"Going to click: {chosen_card} at position ({posX}, {posY})")
+    pyautogui.moveTo(posX, posY, 1, pyautogui.easeInQuad)
     pyautogui.click(x=None, y=None, clicks=2, interval=0.25)
     pyautogui.sleep(5)
+
 
 def readTextInPicture(): # test function for hovering over enemy.
     global window
