@@ -1,7 +1,3 @@
-Here's an improved and detailed README for your project. I've included the requirements and known limitations based on the script you shared.
-
----
-
 # AFK Wizard101 Battle Assistant
 
 This is a Python-based automation script designed to assist with battles in **Wizard101**, using OCR (Optical Character Recognition) and AI decision-making. The script automatically identifies card names, enemy health, and game status to choose optimal actions during battle.
