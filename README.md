@@ -47,7 +47,7 @@ pip install pyautogui numpy opencv-python easyocr pygetwindow pillow keyboard ra
 1. Make sure **Wizard101** is running and the game window is fully visible.
 2. Activate the Python script by executing the following in your terminal or command prompt:
    ```bash
-   python main.py
+   python wizardafkmacro.py
    ```
 3. The script will automatically detect when you enter a battle and start assisting with card selection.
 
